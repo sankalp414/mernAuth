@@ -2,7 +2,7 @@ import { User } from "../models/user.model.js";
 import { apiError } from "../utils/apiError.js";
 import { apiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-
+import jwt from "jsonwebtoken"
 const generateAccessAndRefreshToken = async(userId)=>{
     try {
         const user = await User.findById(userId)
@@ -110,15 +110,79 @@ const logoutUser = asyncHandler(async(req,res)=>{
 
 const refreshAccessToken = asyncHandler(async(req,res)=>{
     
+    const incommingRefreshToken = req.cookies.refreshToken || req.body.refreshToken
 
-    
+    if(!incommingRefreshToken){
+        throw new apiError(401,"Unauthorized request");
+    }
+    try {
+        const decodedToken = jwt.verify(
+            incommingRefreshToken,
+            process.env.REFRESH_TOKEN_SECRET
+        )   
+        const user = await User.findById(decodedToken._id)
+        if(!user){
+            throw new apiError(400,"Invalid api error")
+        }
+        if(incommingRefreshToken !== user?.refreshToken){
+            throw new apiError(401,"Refresh token is expired or used")
+        }
+        const options={
+            httpOnly:true,
+            secure:true
+        }
+        const {accessToken,newRefreshToken} = await generateAccessAndRefreshToken(user._id)
+
+        return res
+        .status(200)
+        .cookie("accessToken",accessToken,options)
+        .cookie("refreshToken",newRefreshToken,options)
+        .json(
+            new apiResponse(200,
+                {
+                    accessToken,
+                    refreshToken:newRefreshToken
+                },
+                "Access token refreshed"
+            ))
+
+
+    } catch (error) {
+        throw new apiError(400,error?.message || "Invalid refresh token")
+        
+    }
+
 
 })
 
+const changeCurrentPassword = asyncHandler(async(req,res)=>{
+
+    const {oldPassword,newPassword} = req.body
+
+    const user = await User.findById(req.user?._id)
+    const isPasswordCorrect = await User.isPasswordValid(oldPassword)
+    
+    if(!isPasswordCorrect){
+        throw new apiError(401,"the password is incoorect")
+    }
+
+    user.password = newPassword
+    await user.save({validateBeforeSave:false})
+
+    return res
+    .status(200)
+    .json(200,{},"Password changed successfully")
+})
+
+const getCurrentUser = asyncHandler(async(req,res)=>{
+    res.status(200).json(200,req.user,"User fetched successfully")
+})
 
 export {
     registerUser,
     loginUser,
     logoutUser,
-    refreshAccessToken
+    refreshAccessToken,
+    changeCurrentPassword,
+    getCurrentUser
 }
